@@ -25,10 +25,14 @@
         "554.roms_r",
         "557.xz_r"
     ],
-    "experiment": "lab1",
+    "experiment": "lab2",
     "configurations": {
-        "baseline": "--map_cycles 5 --issue_width 4",
-        "map_10": "--map_cycles 10",
-        "issue_width_10": "--issue_width 10 --node_ret_width 10"
-  }
+        "dcache_32k_assoc_4": "--dcache_size 32768 --dcache_assoc 4",
+        "dcache_4k_assoc_1": "--dcache_size 4096 --dcache_assoc 1",
+        "dcache_4k_assoc_4": "--dcache_size 4096 --dcache_assoc 4",
+        "dcache_4k_assoc_64": "--dcache_size 4096 --dcache_assoc 64",
+        "dcache_256k_assoc_1": "--dcache_size 262144 --dcache_assoc 1",
+        "dcache_256k_assoc_4": "--dcache_size 262144 --dcache_assoc 4",
+        "dcache_256k_assoc_64": "--dcache_size 262144 --dcache_assoc 64"
+    }
 }
