@@ -208,6 +208,14 @@ void init_cache(Cache* cache, const char* name, uns cache_size, uns assoc,
   }
 
   cache->tag_incl_offset = FALSE;
+
+  /* TEST: instantiate 3Cs flags */
+  cache->is_conflict_miss = FALSE;
+  cache->is_capacity_miss = FALSE;
+  cache->is_compulsory_miss = FALSE;
+
+  /* TEST: instantiate hashtable for compulsory misses */
+  init_hash_table(&cache->accessed_blocks, "Accessed Blocks", NODE_TABLE_SIZE, sizeof(Flag));
 }
 
 /**************************************************************************************/
@@ -263,6 +271,48 @@ void* cache_access(Cache* cache, Addr addr, Addr* line_addr, Flag update_repl) {
     DEBUG(0, "Checking shadow cache '%s' at (set %u), base 0x%s\n", cache->name,
           set, hexstr64s(addr));
     return access_shadow_lines(cache, set, tag);
+  }
+
+  /* 
+  TEST:
+  1) if addr has never been accessed, it is a compulsory miss; break;
+  2) if n-way misses but FA has_empty_slot, it is a capacity miss;
+  3) else; it is a conflict miss;
+  */ 
+  cache->is_compulsory_miss = FALSE; 
+  cache->is_conflict_miss = FALSE;
+  cache->is_capacity_miss = FALSE;
+
+  if(strcmp(cache->name, "DCACHE") == 0 || strcmp(cache->name, "FA_DCACHE") == 0) {
+    Flag new_entry = FALSE;
+    void* value = hash_table_access_create(&cache->accessed_blocks, *line_addr, &new_entry);
+
+    if (new_entry) {
+        cache->is_compulsory_miss = TRUE;
+        cache->is_conflict_miss = FALSE;
+        cache->is_capacity_miss = FALSE;
+        Flag *dummy = (Flag *) value;
+        *dummy = TRUE;
+    } else {
+      Flag has_empty_slot = FALSE;
+      for(int ii = 0; ii < cache->assoc; ii++) {
+        Cache_Entry* line = &cache->entries[set][ii];
+        if(!line->valid) {
+          has_empty_slot = TRUE;
+          break;
+    } 
+      }
+
+        if (has_empty_slot) {
+            cache->is_compulsory_miss = FALSE;
+            cache->is_conflict_miss = FALSE;
+            cache->is_capacity_miss = TRUE;
+        } else {
+            cache->is_compulsory_miss = FALSE;
+            cache->is_conflict_miss = TRUE;
+            cache->is_capacity_miss = FALSE;
+        }
+    }
   }
 
 

@@ -150,6 +150,15 @@ typedef struct Cache_struct {
 
   /* For repl with predictor */
   void* predictor;
+
+  /* TEST: keep track of 3Cs */
+  Flag is_conflict_miss;
+  Flag is_capacity_miss;
+  Flag is_compulsory_miss;
+
+  /* TEST: use hash table to track compulsory misses */
+  Hash_Table accessed_blocks;
+
 } Cache;
 
 /**************************************************************************************/

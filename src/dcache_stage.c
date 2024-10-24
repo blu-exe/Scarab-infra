@@ -93,6 +93,10 @@ void init_dcache_stage(uns8 proc_id, const char* name) {
   init_cache(&dc->dcache, "DCACHE", DCACHE_SIZE, DCACHE_ASSOC, DCACHE_LINE_SIZE,
              sizeof(Dcache_Data), DCACHE_REPL);
 
+  /* TEST: initalize FA cache structure, with assoc = # of cache lines*/
+  init_cache(&dc->fa_dcache, "FA_DCACHE", DCACHE_SIZE, DCACHE_SIZE / DCACHE_LINE_SIZE, DCACHE_LINE_SIZE,
+            sizeof(Dcache_Data), DCACHE_REPL);
+
   reset_dcache_stage();
 
   dc->ports = (Ports*)malloc(sizeof(Ports) * DCACHE_BANKS);
@@ -156,10 +160,14 @@ void debug_dcache_stage() {
 /* update_dcache_stage: */
 void update_dcache_stage(Stage_Data* src_sd) {
   Dcache_Data* line;
+  /* TEST: integrate FA cache line access*/
+  Dcache_Data* fa_line;
   Counter      oldest_op_num, last_oldest_op_num;
   uns          oldest_index;
   int          start_op_count;
+  /* TEST: integrate FA cache line access*/
   Addr         line_addr;
+  Addr         fa_line_addr;
   uns          ii, jj;
 
   // {{{ phase 1 - move ops into the dcache stage
@@ -286,6 +294,11 @@ void update_dcache_stage(Stage_Data* src_sd) {
 
     line = (Dcache_Data*)cache_access(&dc->dcache, op->oracle_info.va,
                                       &line_addr, TRUE);
+
+    /* TEST: access FA cache second, so that it overrides n-way cache's conflict misses*/
+
+    fa_line = (Dcache_Data*)cache_access(&dc->fa_dcache, op->oracle_info.va,
+                                      &fa_line_addr, TRUE);
     op->dcache_cycle = cycle_count;
     dc->idle_cycle   = MAX2(dc->idle_cycle, cycle_count + DCACHE_CYCLES);
 
@@ -435,6 +448,25 @@ void update_dcache_stage(Stage_Data* src_sd) {
             wrongpath_dcmiss = TRUE;
             STAT_EVENT(op->proc_id, DCACHE_MISS_OFFPATH);
             STAT_EVENT(op->proc_id, DCACHE_MISS_LD_OFFPATH);
+
+            /* TEST: for loads, formalize 3Cs tracked from cache_access() using STAT_EVENT */
+
+            if (dc->dcache.is_compulsory_miss) {
+              STAT_EVENT(op->proc_id, DCACHE_MISS_COMPULSORY_LOAD);
+            } else {
+              if (dc->fa_dcache.is_conflict_miss == TRUE || dc->dcache.is_capacity_miss == TRUE) {
+                dc->dcache.is_capacity_miss = TRUE;
+                dc->dcache.is_conflict_miss = FALSE;
+              }
+
+              if (dc->dcache.is_conflict_miss) {
+                STAT_EVENT(op->proc_id, DCACHE_MISS_CONFLICT_LOAD);
+              } else if (dc->dcache.is_capacity_miss) {
+                STAT_EVENT(op->proc_id, DCACHE_MISS_CAPACITY_LOAD);
+              } else {
+                STAT_EVENT(op->proc_id, DCACHE_MISS_WEIRD);
+              }
+            }
           }
           op->state              = OS_MISS;
           op->engine_info.dcmiss = TRUE;
@@ -544,6 +576,25 @@ void update_dcache_stage(Stage_Data* src_sd) {
             STAT_EVENT(op->proc_id, DCACHE_MISS_ST_ONPATH);
             op->oracle_info.dcmiss = TRUE;
             STAT_EVENT(op->proc_id, DCACHE_MISS_ST);
+
+            /* TEST: for stores, formalize 3Cs tracked from cache_access() using STAT_EVENT */
+            if (dc->dcache.is_compulsory_miss) {
+              STAT_EVENT(op->proc_id, DCACHE_MISS_COMPULSORY_STORE);
+            } else {
+              if (dc->fa_dcache.is_conflict_miss == TRUE || dc->dcache.is_capacity_miss == TRUE) {
+                dc->dcache.is_capacity_miss = TRUE;
+                dc->dcache.is_conflict_miss = FALSE;
+              }
+
+              if (dc->dcache.is_conflict_miss) {
+                STAT_EVENT(op->proc_id, DCACHE_MISS_CONFLICT_STORE);
+              } else if (dc->dcache.is_capacity_miss) {
+                STAT_EVENT(op->proc_id, DCACHE_MISS_CAPACITY_STORE);
+              } else {
+                STAT_EVENT(op->proc_id, DCACHE_MISS_WEIRD);
+              }
+            }
+
           } else {
             wrongpath_dcmiss = TRUE;
             STAT_EVENT(op->proc_id, DCACHE_MISS_OFFPATH);
@@ -593,6 +644,8 @@ Flag dcache_fill_line(Mem_Req* req) {
              N_BIT_MASK(LOG2(DCACHE_BANKS));
   Dcache_Data* data;
   Addr         line_addr, repl_line_addr;
+  /* TEST: implement fill reqs for FA $ */
+  Addr         fa_line_addr, fa_repl_line_addr;
   Op*          op;
   Op**         op_p  = (Op**)list_start_head_traversal(&req->op_ptrs);
   Counter* op_unique = (Counter*)list_start_head_traversal(&req->op_uniques);
@@ -625,6 +678,7 @@ Flag dcache_fill_line(Mem_Req* req) {
 
     data = (Dcache_Data*)cache_insert(&dc->pref_dcache, dc->proc_id, req->addr,
                                       &line_addr, &repl_line_addr);
+    
     ASSERT(dc->proc_id, req->emitted_cycle);
     ASSERT(dc->proc_id, cycle_count >= req->emitted_cycle);
     // mark the data as HW_prefetch if prefetch mark it as
@@ -677,6 +731,9 @@ Flag dcache_fill_line(Mem_Req* req) {
 
     data = (Dcache_Data*)cache_insert(&dc->dcache, dc->proc_id, req->addr,
                                       &line_addr, &repl_line_addr);
+    /* TEST: store during fill, but don't return data from FA $  */
+    cache_insert(&dc->fa_dcache, dc->proc_id, req->addr,
+                                      &fa_line_addr, &fa_repl_line_addr);
     DEBUG(dc->proc_id,
           "Filling dcache  off_path:%d addr:0x%s  :%7d index:%7d op_count:%d "
           "oldest:%lld\n",
